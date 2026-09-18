@@ -21,6 +21,20 @@ NexaBar is a native macOS menu-bar utility combining real-time hardware monitori
 
 ---
 
+## 🔒 Permissions & Setup (Per-App Audio)
+
+For per-application volume sliders to function on macOS 14.2+, NexaBar requires **Screen & System Audio Recording** permission.
+
+### How to Add NexaBar in System Settings:
+
+1. Open **System Settings** on your Mac.
+2. Navigate to **Privacy & Security → Screen & System Audio Recording** (or *System Audio Recording Only*).
+3. Click the **`+` (Plus)** button at the bottom of the app list.
+4. In the Finder window, navigate to the **Applications** folder, select **NexaBar**, and click **Open**.
+5. Ensure the toggle switch next to **NexaBar** is set to **ON**.
+
+---
+
 ## 📦 Building & Packaging
 
 NexaBar is built using Swift Package Manager.
@@ -45,13 +59,6 @@ Output installer generated at:
 ```text
 /Users/asif/Downloads/NexaBar/NexaBar.dmg
 ```
-
----
-
-## 🔒 Permissions & Security
-
-- **Screen & System Audio Recording (`kTCCServiceAudioCapture`)**: Required for per-app audio tapping on macOS 14.2+. Enable in **System Settings → Privacy & Security → Screen & System Audio Recording → NexaBar**.
-- **Accessibility**: Optional for global shortcut detection (`Cmd + Shift + V`).
 
 ---
 
