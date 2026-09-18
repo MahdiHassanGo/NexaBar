@@ -30,8 +30,17 @@ final class AppAudioController: @unchecked Sendable {
     private let controlQueue = DispatchQueue(label: "com.nexabar.per-app-audio", qos: .userInitiated)
 
     /// Check if system audio capture (Screen & System Audio Recording) permission is granted.
+    private typealias PreflightFunc = @convention(c) (CFString, CFDictionary?) -> Int
+
     static func hasAudioCapturePermission() -> Bool {
-        CGPreflightScreenCaptureAccess()
+        guard let handle = dlopen("/System/Library/PrivateFrameworks/TCC.framework/Versions/A/TCC", RTLD_NOW),
+              let sym = dlsym(handle, "TCCAccessPreflight") else {
+            return true
+        }
+        let preflight = unsafeBitCast(sym, to: PreflightFunc.self)
+        let result = preflight("kTCCServiceAudioCapture" as CFString, nil)
+        // 0 = authorized, 1 = denied, -1 = unknown
+        return result != 1
     }
 
     func getRunningAudioApps(existingItems: [AppAudioItem]) -> [AppAudioItem] {
