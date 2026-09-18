@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="Sources/NexaBar/nexabarlogo.png" width="180" alt="NexaBar Logo" />
+  <img src="Sources/NexaBar/AppIcon.png" width="180" alt="NexaBar Logo" />
 </p>
 
 # NexaBar
