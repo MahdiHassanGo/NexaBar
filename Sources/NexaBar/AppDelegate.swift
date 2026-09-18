@@ -4,7 +4,7 @@ import Combine
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let statusItem = NSStatusBar.system.statusItem(withLength: 194)
+    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let popover = NSPopover()
     private let state = AppState()
     private var cancellables = Set<AnyCancellable>()
@@ -90,14 +90,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor private func refreshStatusItem() {
         guard let button = statusItem.button else { return }
 
-        // Keep a fixed width for each selected layout. NSStatusItem.variableLength causes
-        // every changing network/CPU value to resize the item and shove neighboring icons.
-        let mode = UserDefaults.standard.string(forKey: "menuBarMode") ?? "balanced"
-        switch mode {
-        case "compact": statusItem.length = 108
-        case "full": statusItem.length = 300
-        default: statusItem.length = 194
-        }
+        // Use variable length so item sizes dynamically to fit notched MacBooks without being hidden
+        statusItem.length = NSStatusItem.variableLength
 
         let text = " " + state.menuBarText
         let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
