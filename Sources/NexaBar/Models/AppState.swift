@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import ServiceManagement
 
 @MainActor
 final class AppState: ObservableObject {
@@ -18,6 +19,7 @@ final class AppState: ObservableObject {
     @Published var clipboardItems: [ClipboardItem] = []
     @Published var toastMessage: String?
     @Published var statusVersion: Int = 0
+    @Published var launchAtLogin: Bool = false
 
     var onRequestClosePopover: (() -> Void)?
     var onRequestTogglePopover: (() -> Void)?
@@ -62,6 +64,7 @@ final class AppState: ObservableObject {
         clipboardItems = clipboard.items
         refreshMonitor()
         refreshAudio()
+        refreshLaunchAtLogin()
 
         // Register Global Hotkey Cmd+Shift+V
         hotkey.onTrigger = { [weak self] in
@@ -237,6 +240,34 @@ final class AppState: ObservableObject {
             try? await Task.sleep(for: .seconds(1.8))
             guard !Task.isCancelled else { return }
             self?.toastMessage = nil
+        }
+    }
+
+    func refreshLaunchAtLogin() {
+        if #available(macOS 13.0, *) {
+            launchAtLogin = (SMAppService.mainApp.status == .enabled)
+        }
+    }
+
+    func toggleLaunchAtLogin(enabled: Bool) {
+        if #available(macOS 13.0, *) {
+            do {
+                if enabled {
+                    if SMAppService.mainApp.status != .enabled {
+                        try SMAppService.mainApp.register()
+                    }
+                    showToast("Launch at login enabled")
+                } else {
+                    if SMAppService.mainApp.status == .enabled {
+                        try SMAppService.mainApp.unregister()
+                    }
+                    showToast("Launch at login disabled")
+                }
+                refreshLaunchAtLogin()
+            } catch {
+                showToast(enabled ? "Install NexaBar to Applications to enable Launch at Login" : "Failed to change Launch at Login")
+                refreshLaunchAtLogin()
+            }
         }
     }
 }

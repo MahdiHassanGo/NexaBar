@@ -331,9 +331,9 @@ struct ContentView: View {
     }
 
     private var settingsCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label("Menu Bar & Shortcuts", systemImage: "menubar.rectangle")
+                Label("Settings & Options", systemImage: "gearshape")
                     .font(.headline)
                 Spacer()
                 Text("⌘⇧V")
@@ -343,17 +343,39 @@ struct ContentView: View {
                     .background(Capsule().fill(Color.primary.opacity(0.1)))
             }
 
-            Picker("Menu Bar Layout", selection: $menuBarMode) {
-                Text("Compact").tag("compact")
-                Text("Balanced").tag("balanced")
-                Text("Full").tag("full")
+            Toggle(isOn: Binding(
+                get: { state.launchAtLogin },
+                set: { state.toggleLaunchAtLogin(enabled: $0) }
+            )) {
+                HStack(spacing: 8) {
+                    Image(systemName: "power")
+                        .foregroundStyle(.blue)
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("Start NexaBar at startup")
+                        .font(.system(size: 12.5, weight: .medium))
+                }
             }
-            .pickerStyle(.segmented)
+            .toggleStyle(.switch)
 
-            Text(menuBarPreview)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            Divider().opacity(0.3)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Menu Bar Layout")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Picker("Menu Bar Layout", selection: $menuBarMode) {
+                    Text("Compact").tag("compact")
+                    Text("Balanced").tag("balanced")
+                    Text("Full").tag("full")
+                }
+                .pickerStyle(.segmented)
+
+                Text(menuBarPreview)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .padding(14)
         .background(.quaternary.opacity(0.28), in: RoundedRectangle(cornerRadius: 14, style: .continuous))

@@ -14,7 +14,8 @@ let package = Package(
             name: "NexaBar",
             path: "Sources/NexaBar",
             resources: [
-                .process("AppIcon.png")
+                .process("AppIcon.png"),
+                .process("nexabarlogo.png")
             ],
             linkerSettings: [
                 .linkedFramework("AppKit"),
