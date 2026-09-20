@@ -4,6 +4,7 @@ import CoreGraphics
 import CoreAudio
 import Darwin
 import Foundation
+import Accelerate
 
 struct AppAudioItem: Identifiable, Equatable {
     let id: String
@@ -335,11 +336,16 @@ final class AppAudioController: @unchecked Sendable {
 
     private typealias ResponsibilityFunc = @convention(c) (pid_t) -> pid_t
 
-    private func getResponsiblePID(for pid: pid_t) -> pid_t? {
+    private static let cachedResponsibilityFunc: ResponsibilityFunc? = {
         guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -1), "responsibility_get_pid_responsible_for_pid") else {
             return nil
         }
-        let responsiblePID = unsafeBitCast(symbol, to: ResponsibilityFunc.self)(pid)
+        return unsafeBitCast(symbol, to: ResponsibilityFunc.self)
+    }()
+
+    private func getResponsiblePID(for pid: pid_t) -> pid_t? {
+        guard let fn = Self.cachedResponsibilityFunc else { return nil }
+        let responsiblePID = fn(pid)
         return responsiblePID > 0 && responsiblePID != pid ? responsiblePID : nil
     }
 
@@ -740,6 +746,8 @@ private final class PerAppAudioSession: @unchecked Sendable {
         var gain = currentGain
         let target = targetGain
         let ramp: Float = 0.0015 // 30ms ramp smoothing for 48kHz audio (FineTune ramp)
+        let isMutedOrZero = target <= 0.0001 && gain <= 0.0001
+        let isSteadyGain = abs(target - gain) < 0.0001
 
         for outputIndex in 0..<outputCount {
             let outputBuffer = outputs[outputIndex]
@@ -769,61 +777,55 @@ private final class PerAppAudioSession: @unchecked Sendable {
                 continue
             }
 
+            if isMutedOrZero {
+                memset(outputRaw, 0, Int(outputBuffer.mDataByteSize))
+                continue
+            }
+
+            let totalSamples = frameCount * outputChannels
+
             if inputChannels == outputChannels {
-                let written = frameCount * outputChannels
-                for frame in 0..<frameCount {
-                    gain += (target - gain) * ramp
-                    let base = frame * outputChannels
-                    for channel in 0..<outputChannels {
-                        outputSamples[base + channel] = inputSamples[base + channel] * gain
+                if isSteadyGain {
+                    var sGain = target
+                    vDSP_vsmul(inputSamples, 1, &sGain, outputSamples, 1, vDSP_Length(totalSamples))
+                    gain = target
+                } else {
+                    for frame in 0..<frameCount {
+                        gain += (target - gain) * ramp
+                        let base = frame * outputChannels
+                        for channel in 0..<outputChannels {
+                            outputSamples[base + channel] = inputSamples[base + channel] * gain
+                        }
                     }
-                }
-                if written < outputSampleCount {
-                    memset(
-                        outputSamples.advanced(by: written),
-                        0,
-                        (outputSampleCount - written) * MemoryLayout<Float>.size
-                    )
                 }
             } else if inputChannels == 2 && outputChannels >= 2 {
-                let written = frameCount * outputChannels
-                for frame in 0..<frameCount {
-                    gain += (target - gain) * ramp
-                    let inBase = frame * 2
-                    let outBase = frame * outputChannels
-                    for channel in 0..<outputChannels {
-                        outputSamples[outBase + channel] = 0
+                if isSteadyGain {
+                    let sGain = target
+                    let inSamples2 = inputSamples
+                    for frame in 0..<frameCount {
+                        let inBase = frame * 2
+                        let outBase = frame * outputChannels
+                        outputSamples[outBase] = inSamples2[inBase] * sGain
+                        outputSamples[outBase + 1] = inSamples2[inBase + 1] * sGain
+                        for ch in 2..<outputChannels {
+                            outputSamples[outBase + ch] = 0
+                        }
                     }
-                    outputSamples[outBase] = inputSamples[inBase] * gain
-                    outputSamples[outBase + 1] = inputSamples[inBase + 1] * gain
-                }
-                if written < outputSampleCount {
-                    memset(
-                        outputSamples.advanced(by: written),
-                        0,
-                        (outputSampleCount - written) * MemoryLayout<Float>.size
-                    )
-                }
-            } else if inputChannels == 1 {
-                let written = frameCount * outputChannels
-                for frame in 0..<frameCount {
-                    gain += (target - gain) * ramp
-                    let sample = inputSamples[frame] * gain
-                    let outBase = frame * outputChannels
-                    for channel in 0..<outputChannels {
-                        outputSamples[outBase + channel] = sample
+                    gain = target
+                } else {
+                    for frame in 0..<frameCount {
+                        gain += (target - gain) * ramp
+                        let inBase = frame * 2
+                        let outBase = frame * outputChannels
+                        for channel in 0..<outputChannels {
+                            outputSamples[outBase + channel] = 0
+                        }
+                        outputSamples[outBase] = inputSamples[inBase] * gain
+                        outputSamples[outBase + 1] = inputSamples[inBase + 1] * gain
                     }
-                }
-                if written < outputSampleCount {
-                    memset(
-                        outputSamples.advanced(by: written),
-                        0,
-                        (outputSampleCount - written) * MemoryLayout<Float>.size
-                    )
                 }
             } else {
                 let copiedChannels = min(inputChannels, outputChannels)
-                let written = frameCount * outputChannels
                 for frame in 0..<frameCount {
                     gain += (target - gain) * ramp
                     let inBase = frame * inputChannels
@@ -834,18 +836,20 @@ private final class PerAppAudioSession: @unchecked Sendable {
                             : 0
                     }
                 }
-                if written < outputSampleCount {
-                    memset(
-                        outputSamples.advanced(by: written),
-                        0,
-                        (outputSampleCount - written) * MemoryLayout<Float>.size
-                    )
-                }
+            }
+
+            if totalSamples < outputSampleCount {
+                memset(
+                    outputSamples.advanced(by: totalSamples),
+                    0,
+                    (outputSampleCount - totalSamples) * MemoryLayout<Float>.size
+                )
             }
         }
 
         currentGain = gain
     }
+
 
     nonisolated private static func zero(_ outputData: UnsafeMutablePointer<AudioBufferList>) {
         let outputs = UnsafeMutableAudioBufferListPointer(outputData)

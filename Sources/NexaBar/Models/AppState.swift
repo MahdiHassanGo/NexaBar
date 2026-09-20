@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import ServiceManagement
+import CoreAudio
 
 @MainActor
 final class AppState: ObservableObject {
@@ -35,6 +36,7 @@ final class AppState: ObservableObject {
     private var clipboardTimer: Timer?
     private var volumeTimer: Timer?
     private var toastTask: Task<Void, Never>?
+    private var audioPropertyListenerBlock: AudioObjectPropertyListenerBlock?
 
     var menuBarText: String {
         let mode = UserDefaults.standard.string(forKey: "menuBarMode") ?? "balanced"
@@ -65,6 +67,7 @@ final class AppState: ObservableObject {
         refreshMonitor()
         refreshAudio()
         refreshLaunchAtLogin()
+        setupAudioListeners()
 
         // Register Global Hotkey Cmd+Shift+V
         hotkey.onTrigger = { [weak self] in
@@ -72,20 +75,20 @@ final class AppState: ObservableObject {
         }
         hotkey.registerDefaultShortcut()
 
-        monitorTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+        monitorTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.refreshMonitor() }
         }
-        monitorTimer?.tolerance = 0.25
+        monitorTimer?.tolerance = 0.5
 
-        clipboardTimer = Timer.scheduledTimer(withTimeInterval: 0.6, repeats: true) { [weak self] _ in
+        clipboardTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.refreshClipboard() }
         }
-        clipboardTimer?.tolerance = 0.15
+        clipboardTimer?.tolerance = 0.3
 
-        volumeTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
+        volumeTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.refreshAudio() }
         }
-        volumeTimer?.tolerance = 0.5
+        volumeTimer?.tolerance = 2.0
     }
 
     func stop() {
@@ -95,9 +98,68 @@ final class AppState: ObservableObject {
         monitorTimer = nil
         clipboardTimer = nil
         volumeTimer = nil
+        removeAudioListeners()
         hotkey.unregister()
         appAudio.stop()
     }
+
+    private func setupAudioListeners() {
+        let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            Task { @MainActor [weak self] in
+                self?.refreshAudio()
+            }
+        }
+        self.audioPropertyListenerBlock = block
+
+        var devAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var defAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var procAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyProcessObjectList,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        let systemObj = AudioObjectID(kAudioObjectSystemObject)
+        let queue = DispatchQueue.global(qos: .utility)
+        AudioObjectAddPropertyListenerBlock(systemObj, &devAddress, queue, block)
+        AudioObjectAddPropertyListenerBlock(systemObj, &defAddress, queue, block)
+        AudioObjectAddPropertyListenerBlock(systemObj, &procAddress, queue, block)
+    }
+
+    private func removeAudioListeners() {
+        guard let block = audioPropertyListenerBlock else { return }
+        var devAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var defAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var procAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyProcessObjectList,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        let systemObj = AudioObjectID(kAudioObjectSystemObject)
+        let queue = DispatchQueue.global(qos: .utility)
+        AudioObjectRemovePropertyListenerBlock(systemObj, &devAddress, queue, block)
+        AudioObjectRemovePropertyListenerBlock(systemObj, &defAddress, queue, block)
+        AudioObjectRemovePropertyListenerBlock(systemObj, &procAddress, queue, block)
+        audioPropertyListenerBlock = nil
+    }
+
 
     func refreshMonitor() {
         let monitor = self.monitor

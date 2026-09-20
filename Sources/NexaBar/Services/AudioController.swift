@@ -94,11 +94,11 @@ final class AudioController: @unchecked Sendable {
         var v = vol
         if AudioObjectSetPropertyData(deviceID, &address, 0, nil, size, &v) != noErr {
             address.mElement = 1
-            AudioObjectSetPropertyData(deviceID, &address, 0, nil, size, &v)
-        }
-        
-        if deviceID == getDefaultOutputDeviceID() {
-            setSystemVolumeScript(volume)
+            if AudioObjectSetPropertyData(deviceID, &address, 0, nil, size, &v) != noErr {
+                address.mSelector = AudioObjectPropertySelector(0x76697274) // VirtualMainVolume
+                address.mElement = kAudioObjectPropertyElementMain
+                _ = AudioObjectSetPropertyData(deviceID, &address, 0, nil, size, &v)
+            }
         }
     }
 
@@ -112,11 +112,7 @@ final class AudioController: @unchecked Sendable {
         let size = UInt32(MemoryLayout<UInt32>.size)
         if AudioObjectSetPropertyData(deviceID, &address, 0, nil, size, &mute) != noErr {
             address.mElement = 1
-            AudioObjectSetPropertyData(deviceID, &address, 0, nil, size, &mute)
-        }
-        
-        if deviceID == getDefaultOutputDeviceID() {
-            setSystemMuteScript(!currentMute)
+            _ = AudioObjectSetPropertyData(deviceID, &address, 0, nil, size, &mute)
         }
     }
 
@@ -199,8 +195,11 @@ final class AudioController: @unchecked Sendable {
         if AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &vol) != noErr {
             address.mElement = 1
             if AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &vol) != noErr {
-                // Fallback to script if CoreAudio volume getter fails
-                return getSystemVolumeScript()
+                address.mSelector = AudioObjectPropertySelector(0x76697274) // VirtualMainVolume
+                address.mElement = kAudioObjectPropertyElementMain
+                if AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &vol) != noErr {
+                    return 0.5
+                }
             }
         }
         return min(max(Double(vol), 0.0), 1.0)
@@ -222,9 +221,10 @@ final class AudioController: @unchecked Sendable {
     }
 
     private func getFallbackState() -> [AudioDeviceItem] {
-        let vol = getSystemVolumeScript()
+        let defaultID = getDefaultOutputDeviceID()
+        let vol = defaultID != 0 ? getDeviceVolume(deviceID: defaultID) : 0.5
         return [AudioDeviceItem(
-            id: 1,
+            id: defaultID != 0 ? defaultID : 1,
             uid: "default",
             name: "Mac Audio Output",
             volume: vol,
@@ -232,41 +232,5 @@ final class AudioController: @unchecked Sendable {
             isDefaultOutput: true
         )]
     }
-
-    private func getSystemVolumeScript() -> Double {
-        guard let volumeText = runAppleScript("output volume of (get volume settings)"),
-              let vol = Double(volumeText.trimmingCharacters(in: .whitespacesAndNewlines)) else {
-            return 0.5
-        }
-        return vol / 100.0
-    }
-
-    private func setSystemVolumeScript(_ volume: Double) {
-        let percent = Int((min(max(volume, 0), 1) * 100).rounded())
-        _ = runAppleScript("set volume output volume \(percent)")
-    }
-
-    private func setSystemMuteScript(_ muted: Bool) {
-        _ = runAppleScript("set volume output muted \(muted ? "true" : "false")")
-    }
-
-    @discardableResult
-    private func runAppleScript(_ script: String) -> String? {
-        let process = Process()
-        let output = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", script]
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-            let data = output.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else { return nil }
-            return String(data: data, encoding: .utf8)
-        } catch {
-            return nil
-        }
-    }
 }
+

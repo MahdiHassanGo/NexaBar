@@ -87,13 +87,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &cancellables)
     }
 
+    private var lastMenuBarText: String = ""
+
     @MainActor private func refreshStatusItem() {
         guard let button = statusItem.button else { return }
+
+        let text = " " + state.menuBarText
+        guard text != lastMenuBarText else { return }
+        lastMenuBarText = text
 
         // Use variable length so item sizes dynamically to fit notched MacBooks without being hidden
         statusItem.length = NSStatusItem.variableLength
 
-        let text = " " + state.menuBarText
         let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.lineBreakMode = .byClipping
@@ -105,6 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ]
         button.attributedTitle = NSAttributedString(string: text, attributes: attributes)
     }
+
 
     @MainActor @objc private func togglePopover(_ sender: Any?) {
         guard let button = statusItem.button else { return }
