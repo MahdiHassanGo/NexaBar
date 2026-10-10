@@ -24,8 +24,11 @@ final class AppState: ObservableObject {
 
     var onRequestClosePopover: (() -> Void)?
     var onRequestTogglePopover: (() -> Void)?
+    var onRequestCloseClipboard: (() -> Void)?
+    var onRequestToggleClipboard: (() -> Void)?
 
     let clipboard = ClipboardManager()
+    var updateManager = UpdateManager.shared
     private let monitor = SystemMonitor()
     private let audio = AudioController()
     private let appAudio = AppAudioController()
@@ -38,28 +41,103 @@ final class AppState: ObservableObject {
     private var toastTask: Task<Void, Never>?
     private var audioPropertyListenerBlock: AudioObjectPropertyListenerBlock?
 
-    var menuBarText: String {
+    var currentMenuBarMode: String {
         let mode = UserDefaults.standard.string(forKey: "menuBarMode") ?? "balanced"
+        if mode == "compact" { return "compact" }
+        return "balanced"
+    }
+
+    var menuBarSummaryText: String {
+        let mode = currentMenuBarMode
         let cpu = Int(cpuPercent.rounded())
         let mem = Int(memoryPercent.rounded())
         let disk = Int(diskPercent.rounded())
-        let tempInt = cpuTemperature.map { Int($0.rounded()) }
+        let down = ByteFormatter.rate(downloadBytesPerSecond)
 
         let cpuStr = String(format: "%2d%%", cpu)
         let memStr = String(format: "%2d%%", mem)
         let diskStr = String(format: "%2d%%", disk)
-        let tempStr = tempInt.map { String(format: "%2d°", $0) } ?? "--°"
+
+        if mode == "compact" {
+            return "CPU \(cpuStr) RAM \(memStr)"
+        } else {
+            return "CPU \(cpuStr) RAM \(memStr) SSD \(diskStr) NET \(down)"
+        }
+    }
+
+    var menuBarText: String {
+        menuBarSummaryText
+    }
+
+    var menuBarToolTip: String {
+        let cpu = Int(cpuPercent.rounded())
+        let mem = Int(memoryPercent.rounded())
+        let disk = Int(diskPercent.rounded())
+        let tempStr = cpuTemperature.map { "\(Int($0.rounded()))°C" } ?? "N/A"
         let down = ByteFormatter.rate(downloadBytesPerSecond)
         let up = ByteFormatter.rate(uploadBytesPerSecond)
+        return "NexaBar (⌘⇧V for Clipboard)\nCPU: \(cpu)% (\(tempStr)) | RAM: \(mem)% | SSD: \(disk)%\nNetwork: ↓\(down) ↑\(up)"
+    }
 
-        switch mode {
-        case "compact":
-            return "\(cpuStr)  \(tempStr)"
-        case "full":
-            return "CPU \(cpuStr)  MEM \(memStr)  SSD \(diskStr)  \(tempStr)  ↓\(down) ↑\(up)"
-        default:
-            return "\(cpuStr)  \(memStr)  \(diskStr)  \(tempStr)  ↓\(down)"
+    private func symbolAttachment(named systemName: String, accessibilityLabel: String) -> NSAttributedString {
+        let config = NSImage.SymbolConfiguration(pointSize: 13.0, weight: .semibold)
+        guard let img = NSImage(systemSymbolName: systemName, accessibilityDescription: accessibilityLabel)?.withSymbolConfiguration(config) else {
+            return NSAttributedString(string: " ")
         }
+        img.isTemplate = true
+        let attachment = NSTextAttachment()
+        attachment.image = img
+        attachment.bounds = CGRect(x: 0, y: -2.2, width: 14.5, height: 13.5)
+        return NSAttributedString(attachment: attachment)
+    }
+
+    var menuBarAttributedString: NSAttributedString {
+        let mode = currentMenuBarMode
+        let cpu = Int(cpuPercent.rounded())
+        let mem = Int(memoryPercent.rounded())
+        let disk = Int(diskPercent.rounded())
+        let down = ByteFormatter.rate(downloadBytesPerSecond)
+
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 12.0, weight: .medium)
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.lineBreakMode = .byClipping
+
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor.labelColor,
+            .paragraphStyle: paragraphStyle
+        ]
+
+        let cpuStr = String(format: " %2d%%", cpu)
+        let memStr = String(format: " %2d%%", mem)
+        let diskStr = String(format: " %2d%%", disk)
+        let netStr = " \(down)"
+
+        let result = NSMutableAttributedString()
+
+        if mode == "compact" {
+            // Compact: CPU and RAM with individual icons
+            result.append(symbolAttachment(named: "cpu", accessibilityLabel: "CPU"))
+            result.append(NSAttributedString(string: "\(cpuStr)  ", attributes: attrs))
+
+            result.append(symbolAttachment(named: "memorychip", accessibilityLabel: "RAM"))
+            result.append(NSAttributedString(string: memStr, attributes: attrs))
+        } else {
+            // Balanced: CPU, RAM, Storage, and Internet each with their own icon
+            result.append(symbolAttachment(named: "cpu", accessibilityLabel: "CPU"))
+            result.append(NSAttributedString(string: "\(cpuStr)  ", attributes: attrs))
+
+            result.append(symbolAttachment(named: "memorychip", accessibilityLabel: "RAM"))
+            result.append(NSAttributedString(string: "\(memStr)  ", attributes: attrs))
+
+            result.append(symbolAttachment(named: "internaldrive", accessibilityLabel: "Storage"))
+            result.append(NSAttributedString(string: "\(diskStr)  ", attributes: attrs))
+
+            result.append(symbolAttachment(named: "network", accessibilityLabel: "Internet"))
+            result.append(NSAttributedString(string: netStr, attributes: attrs))
+        }
+
+        return result
     }
 
     func start() {
@@ -69,9 +147,9 @@ final class AppState: ObservableObject {
         refreshLaunchAtLogin()
         setupAudioListeners()
 
-        // Register Global Hotkey Cmd+Shift+V
+        // Register Global Hotkey Cmd+Shift+V -> Opens Clipboard History directly
         hotkey.onTrigger = { [weak self] in
-            self?.onRequestTogglePopover?()
+            self?.onRequestToggleClipboard?()
         }
         hotkey.registerDefaultShortcut()
 
@@ -89,6 +167,8 @@ final class AppState: ObservableObject {
             Task { @MainActor [weak self] in self?.refreshAudio() }
         }
         volumeTimer?.tolerance = 2.0
+
+        updateManager.start()
     }
 
     func stop() {
@@ -101,6 +181,7 @@ final class AppState: ObservableObject {
         removeAudioListeners()
         hotkey.unregister()
         appAudio.stop()
+        updateManager.stop()
     }
 
     private func setupAudioListeners() {

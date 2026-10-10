@@ -1,0 +1,40 @@
+name: Release NexaBar
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release Tag (e.g. v0.3.0)'
+        required: true
+        default: 'v0.3.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build & Attach Universal DMG
+    runs-on: macos-14
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Show Environment Info
+        run: |
+          sw_vers
+          swift --version
+
+      - name: Build NexaBar Universal DMG
+        run: |
+          chmod +x ./Scripts/*.sh
+          ./Scripts/build_dmg.sh
+
+      - name: Upload DMG Asset to GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.event.release.tag_name || github.event.inputs.tag_name }}
+        run: |
+          echo "Uploading NexaBar.dmg to GitHub Release ($TAG_NAME)..."
+          gh release upload "$TAG_NAME" NexaBar.dmg --clobber

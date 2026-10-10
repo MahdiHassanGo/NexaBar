@@ -10,6 +10,9 @@ struct ContentView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     header
+                    if let update = state.updateManager.availableRelease {
+                        updateBanner(release: update)
+                    }
                     gauges
                     quickStats
                     audioCard
@@ -36,6 +39,39 @@ struct ContentView: View {
         .frame(width: 404, height: 610)
         .background(.ultraThinMaterial)
         .animation(.easeOut(duration: 0.2), value: state.toastMessage)
+        .sheet(isPresented: $state.updateManager.showUpdateSheet) {
+            UpdateView(updateManager: state.updateManager)
+        }
+        .onAppear {
+            if menuBarMode == "full" {
+                menuBarMode = "balanced"
+            }
+        }
+    }
+
+    private func updateBanner(release: UpdateInfo) -> some View {
+        Button {
+            state.updateManager.showUpdateSheet = true
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .foregroundStyle(.yellow)
+                Text("NexaBar v\(release.version) is available!")
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer()
+                Text("View Update →")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.blue)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Color.blue.opacity(0.25), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private var header: some View {
@@ -359,7 +395,7 @@ struct ContentView: View {
 
             Divider().opacity(0.3)
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text("Menu Bar Layout")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -367,31 +403,98 @@ struct ContentView: View {
                 Picker("Menu Bar Layout", selection: $menuBarMode) {
                     Text("Compact").tag("compact")
                     Text("Balanced").tag("balanced")
-                    Text("Full").tag("full")
                 }
                 .pickerStyle(.segmented)
 
-                Text(menuBarPreview)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 8) {
+                    if menuBarMode == "compact" {
+                        Label("24%", systemImage: "cpu")
+                        Label("61%", systemImage: "memorychip")
+                    } else {
+                        Label("24%", systemImage: "cpu")
+                        Label("61%", systemImage: "memorychip")
+                        Label("72%", systemImage: "internaldrive")
+                        Label("1.2M/s", systemImage: "network")
+                    }
+                }
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .padding(.top, 2)
+            }
+
+            Divider().opacity(0.3)
+
+            // App Updates Subsection
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Label("Software Update", systemImage: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 12.5, weight: .semibold))
+                    Spacer()
+                    Text("v\(state.updateManager.currentVersion)")
+                        .font(.system(size: 11.5, weight: .bold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack {
+                    if state.updateManager.isChecking {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Checking for updates...")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else if let release = state.updateManager.availableRelease {
+                        Text("New version available: v\(release.version)")
+                            .font(.caption)
+                            .foregroundStyle(.blue)
+                            .bold()
+                    } else if case .upToDate = state.updateManager.status {
+                        Text("NexaBar is up to date")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Keep NexaBar updated with latest improvements")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    if state.updateManager.availableRelease != nil {
+                        Button("Update") {
+                            state.updateManager.showUpdateSheet = true
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                    } else {
+                        Button {
+                            state.updateManager.checkForUpdates(isUserInitiated: true)
+                        } label: {
+                            Label("Check Now", systemImage: "arrow.clockwise")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(state.updateManager.isChecking)
+                    }
+                }
+
+                Toggle(isOn: Binding(
+                    get: { state.updateManager.isAutoCheckEnabled },
+                    set: { state.updateManager.isAutoCheckEnabled = $0 }
+                )) {
+                    Text("Check for updates automatically")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .toggleStyle(.checkbox)
             }
         }
         .padding(14)
         .background(.quaternary.opacity(0.28), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
-    private var menuBarPreview: String {
-        switch menuBarMode {
-        case "compact": return "CPU 24%  52°"
-        case "full": return "CPU 24%  MEM 61%  SSD 72%  52°C  ↓1.2M/s ↑90K/s"
-        default: return " 4%  61%  72%  52°  ↓1.2M/s"
-        }
-    }
-
     private var footer: some View {
         HStack {
-            Text("Shortcut: ⌘⇧V (Cmd+Shift+V) to toggle")
+            Text("Shortcut: ⌘⇧V (Cmd+Shift+V) for Clipboard History")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
             Spacer()
