@@ -5,47 +5,35 @@ struct RingGauge: View {
     let systemImage: String
     let value: Double
     let detail: String
+    var accent: Color = NexaTheme.accent
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var normalized: Double { min(max(value / 100, 0), 1) }
-
+    private var percentage: Double { value.isFinite ? min(max(value, 0), 100) : 0 }
     private var tint: Color {
-        switch value {
-        case 90...: return .red
-        case 75...: return .orange
-        default: return .accentColor
-        }
+        if percentage >= 90 { return .red }
+        if percentage >= 75 { return NexaTheme.amber }
+        return accent
     }
-
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 9) {
             ZStack {
-                Circle()
-                    .stroke(.secondary.opacity(0.16), lineWidth: 7)
-
-                Circle()
-                    .trim(from: 0, to: normalized)
-                    .stroke(tint, style: StrokeStyle(lineWidth: 7, lineCap: .round))
+                Circle().stroke(accent.opacity(0.11), lineWidth: 4)
+                Circle().trim(from: 0, to: percentage / 100)
+                    .stroke(tint, style: StrokeStyle(lineWidth: 4, lineCap: .round))
                     .rotationEffect(.degrees(-90))
-                    .animation(.easeOut(duration: 0.35), value: normalized)
-
-                VStack(spacing: 3) {
-                    Image(systemName: systemImage)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    Text("\(Int(value.rounded()))%")
-                        .font(.system(size: 16, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.35), value: percentage)
+                VStack(spacing: 4) {
+                    Image(systemName: systemImage).font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
+                    Text("\(Int(percentage.rounded()))%")
+                        .font(.system(size: 18, weight: .medium, design: .rounded)).monospacedDigit()
                 }
-            }
-            .frame(width: 72, height: 72)
-
-            Text(title)
-                .font(.system(size: 11.5, weight: .semibold))
-            Text(detail)
-                .font(.system(size: 9.5))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+            }.frame(width: 70, height: 70)
+            Text(title).font(.system(size: 11, weight: .medium))
+            Text(detail).font(.system(size: 9)).foregroundStyle(.secondary)
+                .lineLimit(1).minimumScaleFactor(0.8)
         }
         .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .ignore).accessibilityLabel(title)
+        .accessibilityValue("\(Int(percentage.rounded())) percent. \(detail)")
     }
 }

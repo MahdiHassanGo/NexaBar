@@ -9,8 +9,12 @@ BUILD_NUMBER="${BUILD_NUMBER:-1}"
 APP_DIR="$ROOT/dist/NexaBar.app"
 
 printf "\n▸ Building NexaBar %s\n" "$VERSION"
-swift build -c release
-BIN_DIR="$(swift build -c release --show-bin-path)"
+BUILD_ARGS=(-c release)
+if [[ "${UNIVERSAL_BUILD:-0}" == "1" ]]; then
+  BUILD_ARGS+=(--arch arm64 --arch x86_64)
+fi
+swift build "${BUILD_ARGS[@]}"
+BIN_DIR="$(swift build "${BUILD_ARGS[@]}" --show-bin-path)"
 
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
@@ -22,6 +26,22 @@ if [[ -f "$ROOT/AppIcon.icns" ]]; then
 fi
 if [[ -f "$ROOT/Sources/NexaBar/AppIcon.png" ]]; then
   cp "$ROOT/Sources/NexaBar/AppIcon.png" "$APP_DIR/Contents/Resources/AppIcon.png"
+fi
+
+# Preserve SwiftPM resources used by Bundle.module on other Macs.
+if [[ -d "$BIN_DIR/NexaBar_NexaBar.bundle" ]]; then
+  cp -R "$BIN_DIR/NexaBar_NexaBar.bundle" "$APP_DIR/Contents/Resources/"
+fi
+if [[ ! -f "$APP_DIR/Contents/Resources/AppIcon.icns" && -f "$ROOT/Sources/NexaBar/AppIcon.png" ]]; then
+  ICONSET="$ROOT/dist/NexaBar.iconset"
+  mkdir -p "$ICONSET"
+  for SIZE in 16 32 128 256 512; do
+    sips -z "$SIZE" "$SIZE" "$ROOT/Sources/NexaBar/AppIcon.png" --out "$ICONSET/icon_${SIZE}x${SIZE}.png" >/dev/null
+    RETINA=$((SIZE * 2))
+    sips -z "$RETINA" "$RETINA" "$ROOT/Sources/NexaBar/AppIcon.png" --out "$ICONSET/icon_${SIZE}x${SIZE}@2x.png" >/dev/null
+  done
+  iconutil -c icns "$ICONSET" -o "$APP_DIR/Contents/Resources/AppIcon.icns"
+  rm -rf "$ICONSET"
 fi
 
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP_DIR/Contents/Info.plist"

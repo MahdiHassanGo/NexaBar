@@ -2,194 +2,162 @@ import SwiftUI
 import AppKit
 
 struct ClipboardPanel: View {
+    var body: some View { NexaClipboardBrowser(scrolls: false) }
+}
+
+private enum ClipboardFilter: String, CaseIterable, Identifiable {
+    case all = "All", text = "Text", images = "Images"
+    var id: String { rawValue }
+}
+
+struct NexaClipboardBrowser: View {
     @EnvironmentObject private var state: AppState
     @State private var search = ""
+    @State private var filter: ClipboardFilter = .all
+    @State private var confirmClear = false
+    @FocusState private var searchFocused: Bool
+    var scrolls = false
+    var focusOnAppear = false
+    var onCopy: (() -> Void)?
 
     private var filteredItems: [ClipboardItem] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return Array(state.clipboardItems.prefix(10)) }
         return state.clipboardItems.filter { item in
-            if item.type == .text, let text = item.text {
-                return text.localizedCaseInsensitiveContains(query)
-            } else if item.type == .image {
-                return "image media screenshot".contains(query.lowercased())
-            }
-            return false
-        }.prefix(10).map { $0 }
+            let matchesType = filter == .all || (filter == .text && item.type == .text) || (filter == .images && item.type == .image)
+            guard matchesType else { return false }
+            guard !query.isEmpty else { return true }
+            if item.type == .text { return item.text?.localizedCaseInsensitiveContains(query) ?? false }
+            return "image media screenshot photo".localizedCaseInsensitiveContains(query)
+        }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 13) {
+            controls
+            if scrolls {
+                ScrollView { itemList.padding(.bottom, 10) }.scrollIndicators(.hidden)
+            } else { itemList }
+        }
+        .alert("Clear clipboard history?", isPresented: $confirmClear) {
+            Button("Cancel", role: .cancel) { }
+            Button("Clear history", role: .destructive) { state.clearClipboardHistory() }
+        } message: { Text("Saved text and images will be removed from NexaBar.") }
+        .onAppear { if focusOnAppear { searchFocused = true } }
+    }
+
+    private var controls: some View {
+        VStack(spacing: 12) {
             HStack {
-                Label("Clipboard History", systemImage: "doc.on.clipboard")
-                    .font(.headline)
+                Text("Your recent copies").font(.system(size: 12, weight: .medium))
                 Spacer()
                 if !state.clipboardItems.isEmpty {
-                    Button("Clear History") { state.clearClipboardHistory() }
-                        .buttonStyle(.plain)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Button("Clear all") { confirmClear = true }
+                        .buttonStyle(.plain).font(.system(size: 10.5)).foregroundStyle(.secondary)
                 }
             }
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").font(.system(size: 12)).foregroundStyle(.secondary)
+                TextField("Find something you copied…", text: $search)
+                    .textFieldStyle(.plain).font(.system(size: 12)).focused($searchFocused)
+                    .onSubmit { if let first = filteredItems.first { copy(first) } }
+                if !search.isEmpty {
+                    Button { search = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                        .buttonStyle(.plain).help("Clear search").accessibilityLabel("Clear search")
+                }
+            }
+            .padding(11).background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 11))
+            HStack(spacing: 6) {
+                ForEach(ClipboardFilter.allCases) { choice in
+                    Button { filter = choice } label: {
+                        Text(choice.rawValue).font(.system(size: 10.5, weight: .medium))
+                            .padding(.horizontal, 11).padding(.vertical, 6)
+                            .foregroundStyle(filter == choice ? NexaTheme.accent : Color.secondary)
+                            .background(filter == choice ? NexaTheme.accent.opacity(0.12) : Color.clear, in: Capsule())
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain).accessibilityAddTraits(filter == choice ? .isSelected : [])
+                }
+                Spacer()
+                Text("\(filteredItems.count) items").font(.system(size: 10)).foregroundStyle(.secondary)
+            }
+        }
+    }
 
-            TextField("Search clipboard…", text: $search)
-                .textFieldStyle(.roundedBorder)
-
+    private var itemList: some View {
+        LazyVStack(spacing: 8) {
             if filteredItems.isEmpty {
-                HStack {
-                    Spacer()
-                    VStack(spacing: 6) {
-                        Image(systemName: "photo.on.rectangle.angled")
-                            .font(.title2)
-                            .foregroundStyle(.tertiary)
-                        Text("Copy text or images to build your history.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text("Images retained for 8+ hours • ⌘⇧V to toggle")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
-                    .padding(.vertical, 14)
-                    Spacer()
-                }
+                NexaEmptyState(symbol: "doc.on.clipboard", title: state.clipboardItems.isEmpty ? "Your next idea starts here" : "Nothing found",
+                               detail: state.clipboardItems.isEmpty ? "Copy text or an image on your Mac.\nWe'll keep it here for your next step." : "Try another search or switch the filter.")
+                    .nexaCard()
             } else {
-                VStack(spacing: 8) {
-                    ForEach(filteredItems) { item in
-                        clipboardCard(for: item)
+                ForEach(filteredItems) { item in
+                    NexaClipboardRow(item: item, onCopy: { copy(item) }, onDelete: { state.deleteClipboardItem(item) })
+                }
+            }
+        }
+    }
+
+    private func copy(_ item: ClipboardItem) {
+        state.copyClipboardItem(item)
+        onCopy?()
+    }
+}
+
+private struct NexaClipboardRow: View {
+    @EnvironmentObject private var state: AppState
+    let item: ClipboardItem
+    let onCopy: () -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Button(action: onCopy) {
+                HStack(alignment: .center, spacing: 10) {
+                    if item.type == .image {
+                        NexaClipboardThumbnail(url: state.clipboard.getImageURL(for: item))
+                    } else {
+                        Image(systemName: "text.alignleft").font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(NexaTheme.accent).frame(width: 36, height: 36)
+                            .background(NexaTheme.accent.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
                     }
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func clipboardCard(for item: ClipboardItem) -> some View {
-        if item.type == .image {
-            imageCard(for: item)
-        } else {
-            textCard(for: item)
-        }
-    }
-
-    private func textCard(for item: ClipboardItem) -> some View {
-        HStack(spacing: 10) {
-            Button {
-                state.copyClipboardItem(item)
-            } label: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text((item.text ?? "").replacingOccurrences(of: "\n", with: " "))
-                        .font(.system(size: 12.5))
-                        .lineLimit(2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                    Text(item.createdAt, style: .relative)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            .buttonStyle(.plain)
-
-            Button {
-                state.deleteClipboardItem(item)
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.tertiary)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(10)
-        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-
-    private func imageCard(for item: ClipboardItem) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            // Image Thumbnail
-            if let imageURL = state.clipboard.getImageURL(for: item),
-               let nsImage = NSImage(contentsOf: imageURL) {
-                Image(nsImage: nsImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: 56, height: 68)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .stroke(Color.primary.opacity(0.12), lineWidth: 1)
-                    )
-            } else {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.secondary.opacity(0.15))
-                    .frame(width: 56, height: 68)
-                    .overlay(
-                        Image(systemName: "photo")
-                            .foregroundStyle(.secondary)
-                    )
-            }
-
-            // Image Metadata
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Copied media")
-                        .font(.system(size: 13, weight: .bold))
-                    Spacer()
-                    Text(item.createdAt, style: .relative)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-
-                Text("Image history retained for 8+ hours")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-
-                Spacer(minLength: 2)
-
-                HStack(spacing: 16) {
-                    if let size = item.fileSize {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("Size")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                            Text(size)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
+                    VStack(alignment: .leading, spacing: 5) {
+                        if item.type == .image {
+                            Text("Copied image").font(.system(size: 12, weight: .medium))
+                            Text(imageDetail).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                        } else {
+                            Text((item.text ?? "").replacingOccurrences(of: "\n", with: " "))
+                                .font(.system(size: 12)).lineLimit(2).multilineTextAlignment(.leading)
                         }
-                    }
-
-                    if let w = item.width, let h = item.height {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("Resolution")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                            Text("\(w)x\(h)")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
-                        }
-                    }
-
-                    Spacer()
-
-                    Button {
-                        state.copyClipboardItem(item)
-                    } label: {
-                        Label("Copy", systemImage: "doc.on.doc")
-                            .font(.caption)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-
-                    Button {
-                        state.deleteClipboardItem(item)
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                }
+                        Text(item.createdAt, style: .relative).font(.system(size: 9.5)).foregroundStyle(.secondary)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                }.contentShape(Rectangle())
             }
+            .buttonStyle(.plain).help("Copy to clipboard")
+            Button(action: onCopy) { Image(systemName: "doc.on.doc").foregroundStyle(NexaTheme.accent) }
+                .buttonStyle(NexaIconButtonStyle()).help("Copy item").accessibilityLabel("Copy item")
+            Button(action: onDelete) { Image(systemName: "trash").font(.system(size: 10.5)).foregroundStyle(.secondary) }
+                .buttonStyle(.plain).help("Delete item").accessibilityLabel("Delete item")
+        }.padding(12).nexaCard()
+    }
+
+    private var imageDetail: String {
+        var parts: [String] = []
+        if let width = item.width, let height = item.height { parts.append("\(width) × \(height)") }
+        if let size = item.fileSize { parts.append(size) }
+        return parts.joined(separator: " · ")
+    }
+}
+
+private struct NexaClipboardThumbnail: View {
+    let url: URL?
+    @State private var image: NSImage?
+    var body: some View {
+        Group {
+            if let image { Image(nsImage: image).resizable().scaledToFill() }
+            else { Image(systemName: "photo").foregroundStyle(.secondary) }
         }
-        .padding(10)
-        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .frame(width: 42, height: 42)
+        .background(Color.primary.opacity(0.04)).clipShape(RoundedRectangle(cornerRadius: 10))
+        .onAppear { image = url.flatMap { NSImage(contentsOf: $0) } }
     }
 }

@@ -50,7 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor private func configurePopover() {
         popover.behavior = .transient
         popover.animates = true
-        popover.contentSize = NSSize(width: 404, height: 610)
+        popover.contentSize = NSSize(width: NexaTheme.panelWidth, height: NexaTheme.panelHeight)
         popover.contentViewController = NSHostingController(
             rootView: ContentView()
                 .environmentObject(state)

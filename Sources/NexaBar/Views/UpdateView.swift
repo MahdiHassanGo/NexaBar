@@ -6,7 +6,7 @@ struct UpdateView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 18) {
             header
 
             if let release = updateManager.availableRelease {
@@ -19,31 +19,32 @@ struct UpdateView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(20)
-        .frame(width: 440)
-        .background(.ultraThinMaterial)
+        .padding(22)
+        .frame(width: 404)
+        .background(NexaBackground())
+        .tint(NexaTheme.accent)
     }
 
     private var header: some View {
         HStack(spacing: 12) {
             ZStack {
-                Circle()
-                    .fill(LinearGradient(colors: [.blue, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(NexaTheme.accent.opacity(0.12))
                     .frame(width: 44, height: 44)
                 Image(systemName: "arrow.up.circle.fill")
                     .font(.system(size: 26))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(NexaTheme.accent)
             }
 
             VStack(alignment: .leading, spacing: 3) {
-                Text("Software Update Available")
+                Text("A fresh NexaBar")
                     .font(.headline)
 
                 if let release = updateManager.availableRelease {
                     HStack(spacing: 6) {
                         Text("v\(release.version)")
                             .font(.system(size: 13, weight: .bold, design: .rounded))
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(NexaTheme.accent)
 
                         Text("•  Current: v\(updateManager.currentVersion)")
                             .font(.caption)
@@ -68,7 +69,7 @@ struct UpdateView: View {
     private func patchNotesSection(release: UpdateInfo) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Label("Patch Notes", systemImage: "doc.text")
+                Label("What’s new", systemImage: "doc.text")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -132,15 +133,19 @@ struct UpdateView: View {
             .padding(.vertical, 8)
 
         default:
+            if let error = updateManager.errorMessage {
+                Text(error).font(.caption).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             HStack(spacing: 10) {
                 Button("View on GitHub") {
                     NSWorkspace.shared.open(release.htmlUrl)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(NexaButtonStyle())
 
                 Spacer()
 
-                Button("Remind Later") {
+                Button("Later") {
                     dismiss()
                 }
                 .buttonStyle(.plain)
@@ -150,9 +155,9 @@ struct UpdateView: View {
                 Button {
                     updateManager.downloadAndInstallUpdate(release: release)
                 } label: {
-                    Label("Update Now", systemImage: "sparkles")
+                    Label("Install", systemImage: "arrow.down.circle")
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(NexaButtonStyle(prominent: true))
             }
             .padding(.top, 4)
         }

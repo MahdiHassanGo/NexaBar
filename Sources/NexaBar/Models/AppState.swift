@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import AppKit
 import ServiceManagement
 import CoreAudio
@@ -42,7 +43,7 @@ final class AppState: ObservableObject {
     private var audioPropertyListenerBlock: AudioObjectPropertyListenerBlock?
 
     var currentMenuBarMode: String {
-        let mode = UserDefaults.standard.string(forKey: "menuBarMode") ?? "balanced"
+        let mode = UserDefaults.standard.string(forKey: "menuBarMode") ?? "compact"
         if mode == "compact" { return "compact" }
         return "balanced"
     }
