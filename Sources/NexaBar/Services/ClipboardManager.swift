@@ -45,7 +45,8 @@ final class ClipboardManager: @unchecked Sendable {
     private(set) var items: [ClipboardItem] = []
     private let storageKey = "clipboardHistory"
     private let maximumItems = 50
-    private let retentionHours: Double = 8.0 // Keep image history for at least 8 hours
+    private let retentionHours: Double = 24.0 // Keep history for at most 24 hours
+    private var lastPurgeDate: Date = Date.distantPast
 
     let imagesDirectory: URL
 
@@ -56,13 +57,15 @@ final class ClipboardManager: @unchecked Sendable {
 
         lastChangeCount = pasteboard.changeCount
         load()
-        purgeExpiredItems()
+        purgeExpiredItems(force: true)
     }
 
     @discardableResult
     func poll(force: Bool = false) -> Bool {
+        let didChange = purgeExpiredItems(force: force)
+
         let changeCount = pasteboard.changeCount
-        guard force || changeCount != lastChangeCount else { return false }
+        guard force || changeCount != lastChangeCount else { return didChange }
         lastChangeCount = changeCount
 
         // 1. Try reading Image from Pasteboard (direct NSImage or file URL)
@@ -110,14 +113,14 @@ final class ClipboardManager: @unchecked Sendable {
         // 2. Try reading Text from Pasteboard
         if let text = pasteboard.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines),
            !text.isEmpty {
-            if items.first?.text == text { return false }
+            if items.first?.text == text { return didChange }
             items.removeAll { $0.text == text }
             items.insert(ClipboardItem(text: text), at: 0)
             trimAndSave()
             return true
         }
 
-        return false
+        return didChange
     }
 
     func copy(_ item: ClipboardItem) {
@@ -158,17 +161,41 @@ final class ClipboardManager: @unchecked Sendable {
         return imagesDirectory.appendingPathComponent(fileName)
     }
 
-    private func purgeExpiredItems() {
-        let cutoff = Date().addingTimeInterval(-retentionHours * 3600)
+    @discardableResult
+    func purgeExpiredItems(force: Bool = false) -> Bool {
+        let now = Date()
+        guard force || now.timeIntervalSince(lastPurgeDate) >= 30.0 else { return false }
+        lastPurgeDate = now
+
+        let cutoff = now.addingTimeInterval(-retentionHours * 3600)
         let expired = items.filter { $0.createdAt < cutoff }
-        for item in expired {
-            if item.type == .image, let fileName = item.imageFileName {
-                let fileURL = imagesDirectory.appendingPathComponent(fileName)
-                try? FileManager.default.removeItem(at: fileURL)
+        let hasExpired = !expired.isEmpty
+
+        if hasExpired {
+            for item in expired {
+                if item.type == .image, let fileName = item.imageFileName {
+                    let fileURL = imagesDirectory.appendingPathComponent(fileName)
+                    try? FileManager.default.removeItem(at: fileURL)
+                }
+            }
+            items.removeAll { $0.createdAt < cutoff }
+            save()
+        }
+
+        // Periodically purge any orphaned screenshot/clipboard image files on disk older than 24 hours
+        if let fileURLs = try? FileManager.default.contentsOfDirectory(at: imagesDirectory, includingPropertiesForKeys: [.contentModificationDateKey], options: .skipsHiddenFiles) {
+            let activeImageNames = Set(items.compactMap { $0.imageFileName })
+            for url in fileURLs {
+                if !activeImageNames.contains(url.lastPathComponent) {
+                    let modDate = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? Date.distantPast
+                    if modDate < cutoff {
+                        try? FileManager.default.removeItem(at: url)
+                    }
+                }
             }
         }
-        items.removeAll { $0.createdAt < cutoff }
-        save()
+
+        return hasExpired
     }
 
     private func trimAndSave() {

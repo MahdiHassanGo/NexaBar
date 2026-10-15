@@ -20,6 +20,8 @@ struct GitHubRelease: Codable {
     let body: String?
     let htmlUrl: String
     let publishedAt: String?
+    let draft: Bool?
+    let prerelease: Bool?
     let assets: [GitHubAsset]
 
     enum CodingKeys: String, CodingKey {
@@ -28,14 +30,14 @@ struct GitHubRelease: Codable {
         case body
         case htmlUrl = "html_url"
         case publishedAt = "published_at"
+        case draft
+        case prerelease
         case assets
     }
 }
 
 struct SemanticVersion: Comparable, Equatable {
-    let major: Int
-    let minor: Int
-    let patch: Int
+    let components: [Int]
     let raw: String
 
     init(_ string: String) {
@@ -43,20 +45,35 @@ struct SemanticVersion: Comparable, Equatable {
         let cleaned = string.trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
             .trimmingCharacters(in: CharacterSet(charactersIn: "v"))
-        let parts = cleaned.split(separator: ".").compactMap { Int($0) }
-        self.major = parts.indices.contains(0) ? parts[0] : 0
-        self.minor = parts.indices.contains(1) ? parts[1] : 0
-        self.patch = parts.indices.contains(2) ? parts[2] : 0
+        let mainPart = cleaned.components(separatedBy: CharacterSet(charactersIn: "-+")).first ?? cleaned
+        let numbers = mainPart.split(separator: ".").compactMap { part in
+            Int(part.filter { $0.isNumber })
+        }
+        self.components = numbers.isEmpty ? [0] : numbers
     }
 
     static func < (lhs: SemanticVersion, rhs: SemanticVersion) -> Bool {
-        if lhs.major != rhs.major { return lhs.major < rhs.major }
-        if lhs.minor != rhs.minor { return lhs.minor < rhs.minor }
-        return lhs.patch < rhs.patch
+        let maxCount = max(lhs.components.count, rhs.components.count)
+        for i in 0..<maxCount {
+            let left = i < lhs.components.count ? lhs.components[i] : 0
+            let right = i < rhs.components.count ? rhs.components[i] : 0
+            if left != right {
+                return left < right
+            }
+        }
+        return false
     }
 
     static func == (lhs: SemanticVersion, rhs: SemanticVersion) -> Bool {
-        return lhs.major == rhs.major && lhs.minor == rhs.minor && lhs.patch == rhs.patch
+        let maxCount = max(lhs.components.count, rhs.components.count)
+        for i in 0..<maxCount {
+            let left = i < lhs.components.count ? lhs.components[i] : 0
+            let right = i < rhs.components.count ? rhs.components[i] : 0
+            if left != right {
+                return false
+            }
+        }
+        return true
     }
 }
 
@@ -103,7 +120,10 @@ final class UpdateManager: NSObject, ObservableObject, URLSessionDownloadDelegat
     }()
 
     var currentVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.2.0"
+        if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String, !version.isEmpty {
+            return version
+        }
+        return "3.2.0"
     }
 
     var isAutoCheckEnabled: Bool {
@@ -144,7 +164,7 @@ final class UpdateManager: NSObject, ObservableObject, URLSessionDownloadDelegat
         status = .checking
         errorMessage = nil
 
-        let endpoint = "https://api.github.com/repos/\(repoOwner)/\(repoName)/releases/latest"
+        let endpoint = "https://api.github.com/repos/\(repoOwner)/\(repoName)/releases?per_page=50"
         guard let url = URL(string: endpoint) else {
             isChecking = false
             status = .idle
@@ -169,34 +189,60 @@ final class UpdateManager: NSObject, ObservableObject, URLSessionDownloadDelegat
                     return
                 }
 
-                let release = try JSONDecoder().decode(GitHubRelease.self, from: data)
-                let remoteSemVer = SemanticVersion(release.tagName)
+                let releases: [GitHubRelease]
+                if let decodedArray = try? JSONDecoder().decode([GitHubRelease].self, from: data) {
+                    releases = decodedArray
+                } else if let singleRelease = try? JSONDecoder().decode(GitHubRelease.self, from: data) {
+                    releases = [singleRelease]
+                } else {
+                    throw URLError(.cannotParseResponse)
+                }
+
+                // Filter out draft releases
+                let candidateReleases = releases.filter { !($0.draft ?? false) }
+
+                // Find the absolute highest/newest version among all published releases.
+                // This skips intermediate releases (e.g. going directly from v3.0 to v5.6).
+                guard let newestRelease = candidateReleases.max(by: { SemanticVersion($0.tagName) < SemanticVersion($1.tagName) }) else {
+                    self.isChecking = false
+                    self.availableRelease = nil
+                    self.status = .upToDate(version: self.currentVersion)
+                    self.showUpdateSheet = false
+                    return
+                }
+
+                let remoteSemVer = SemanticVersion(newestRelease.tagName)
                 let currentSemVer = SemanticVersion(self.currentVersion)
 
-                let dmgAsset = release.assets.first(where: { $0.name.lowercased().hasSuffix(".dmg") })
+                let dmgAsset = newestRelease.assets.first(where: { $0.name.lowercased().hasSuffix(".dmg") })
                 let dmgUrl = dmgAsset.flatMap { URL(string: $0.browserDownloadUrl) }
                 let dmgSize = dmgAsset?.size ?? 0
 
                 let updateInfo = UpdateInfo(
-                    version: release.tagName.trimmingCharacters(in: CharacterSet(charactersIn: "vV")),
-                    title: release.name ?? "NexaBar \(release.tagName)",
-                    body: release.body ?? "No release notes provided.",
-                    htmlUrl: URL(string: release.htmlUrl) ?? url,
+                    version: newestRelease.tagName.trimmingCharacters(in: CharacterSet(charactersIn: "vV")),
+                    title: newestRelease.name ?? "NexaBar \(newestRelease.tagName)",
+                    body: newestRelease.body ?? "No release notes provided.",
+                    htmlUrl: URL(string: newestRelease.htmlUrl) ?? url,
                     dmgUrl: dmgUrl,
                     dmgSize: dmgSize,
-                    publishedDate: release.publishedAt
+                    publishedDate: newestRelease.publishedAt
                 )
 
                 self.isChecking = false
                 self.lastCheckDate = Date()
 
                 if remoteSemVer > currentSemVer {
+                    // Strictly newer release available: directly target the newest release
                     self.availableRelease = updateInfo
                     self.status = .updateAvailable(release: updateInfo)
-                    self.showUpdateSheet = true
+                    if isUserInitiated {
+                        self.showUpdateSheet = true
+                    }
                 } else {
+                    // Already up to date: do not show any update notices or banners
                     self.availableRelease = nil
                     self.status = .upToDate(version: self.currentVersion)
+                    self.showUpdateSheet = false
                 }
             } catch {
                 self.isChecking = false

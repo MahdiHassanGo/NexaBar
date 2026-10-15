@@ -15,7 +15,7 @@ NexaBar is a native macOS menu-bar utility combining real-time hardware monitori
 - **📊 Hardware System Monitor**: Real-time CPU usage, Memory usage, SSD Storage, CPU Temperature (via SMC sensors), and Network Download/Upload rates.
 - **🔊 Per-App Audio Mixer**: Individual volume controls for running applications (Brave, Chrome, Discord, Spotify, Teams, etc.) using macOS CoreAudio process taps (`AudioHardwareCreateProcessTap`) and device switching.
 - **🎧 Device Output Selector**: Instantly switch output between AirPods, Speakers, HDMI, or HiFi DACs with one click.
-- **📋 Rich Clipboard History**: Persistent text & image history with thumbnail previews, 8-hour auto-retention, and global `Cmd + Shift + V` hotkey toggle.
+- **📋 Rich Clipboard History**: Persistent text & image history with thumbnail previews, 24-hour auto-retention, and global `Cmd + Shift + V` hotkey toggle.
 - **📸 Screenshot Capture**: Quick interactive area selection straight to clipboard and history.
 - **⚙️ Distinct Menu Bar Metric Icons & Layouts**:
   - **Balanced**: Displays CPU, RAM, SSD Storage, and Internet transfer speed, each with their own identifying SF Symbol icon (`cpu`, `memorychip`, `internaldrive`, `network`).
