@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="${VERSION:-3.4.0}"
+VERSION="${VERSION:-4.1.0}"
 APP_DIR="$ROOT/dist/NexaBar.app"
 STAGE="$ROOT/dist/dmg-root"
 DMG="$ROOT/dist/NexaBar-$VERSION.dmg"

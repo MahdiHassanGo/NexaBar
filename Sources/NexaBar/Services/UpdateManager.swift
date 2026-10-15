@@ -123,7 +123,7 @@ final class UpdateManager: NSObject, ObservableObject, URLSessionDownloadDelegat
         if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String, !version.isEmpty {
             return version
         }
-        return "3.4.0"
+        return "4.1.0"
     }
 
     var isAutoCheckEnabled: Bool {

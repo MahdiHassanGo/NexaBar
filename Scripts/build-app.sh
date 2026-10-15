@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-VERSION="${VERSION:-3.4.0}"
+VERSION="${VERSION:-4.1.0}"
 BUILD_NUMBER="${BUILD_NUMBER:-1}"
 APP_DIR="$ROOT/dist/NexaBar.app"
 
