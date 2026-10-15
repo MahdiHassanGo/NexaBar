@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="${VERSION:-3.2.0}"
+VERSION="${VERSION:-3.4.0}"
 export VERSION
 export UNIVERSAL_BUILD=1
 "$ROOT/Scripts/make-dmg.sh"
